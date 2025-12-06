@@ -309,8 +309,21 @@ export class HuiTodoListCard extends LitElement implements LovelaceCard {
   private _toggleSortPanel() {
     this._sortPanelOpen = !this._sortPanelOpen;
   }
+
   private _closeSortPanel() {
     this._sortPanelOpen = false;
+  }
+
+  private _setSortNone() {
+    this._handleSortChange("none");
+  }
+
+  private _setSortPriorityDesc() {
+    this._handleSortChange("priority_desc");
+  }
+
+  private _setSortPriorityAsc() {
+    this._handleSortChange("priority_asc");
   }
 
   private _getUncheckedAndItemsWithoutStatus = memoizeOne(
@@ -637,7 +650,7 @@ export class HuiTodoListCard extends LitElement implements LovelaceCard {
                       name="sort"
                       value="none"
                       .checked=${this._sortMode === "none"}
-                      @change=${this._handleSortChange.bind(this, "none")}
+                      @change=${this._setSortNone}
                     ></ha-radio>
                     <span>Default order</span>
                   </label>
@@ -646,10 +659,7 @@ export class HuiTodoListCard extends LitElement implements LovelaceCard {
                       name="sort"
                       value="priority_desc"
                       .checked=${this._sortMode === "priority_desc"}
-                      @change=${this._handleSortChange.bind(
-                        this,
-                        "priority_desc"
-                      )}
+                      @change=${this._setSortPriorityDesc}
                     ></ha-radio>
                     <span>Urgent to Low</span>
                   </label>
@@ -658,10 +668,7 @@ export class HuiTodoListCard extends LitElement implements LovelaceCard {
                       name="sort"
                       value="priority_asc"
                       .checked=${this._sortMode === "priority_asc"}
-                      @change=${this._handleSortChange.bind(
-                        this,
-                        "priority_asc"
-                      )}
+                      @change=${this._setSortPriorityAsc}
                     ></ha-radio>
                     <span>Low to Urgent</span>
                   </label>
@@ -726,19 +733,6 @@ export class HuiTodoListCard extends LitElement implements LovelaceCard {
         : nothing}
     `;
   }
-
-  // private _handleSortChange(mode: "none" | "priority_desc" | "priority_asc") {
-  //   this._sortMode = mode;
-  //   this._sortPanelOpen = false;
-
-  //   const newConfig = {
-  //     ...this._config!,
-  //     display_order: mode === "none" ? TodoSortMode.NONE : mode,
-  //   };
-
-  //   this._config = newConfig;
-  //   fireEvent(this, "config-changed", { config: newConfig });
-  // }
 
   private _handleSortChange(mode: "none" | "priority_desc" | "priority_asc") {
     this._sortMode = mode;
@@ -1293,7 +1287,7 @@ export class HuiTodoListCard extends LitElement implements LovelaceCard {
       position: absolute;
       top: 48px;
       right: 16px;
-      width: 340px;
+      width: 280px;
       background: var(--card-background-color, white);
       border: 1px solid var(--divider-color);
       border-radius: 12px;
@@ -1399,7 +1393,7 @@ export class HuiTodoListCard extends LitElement implements LovelaceCard {
       position: absolute;
       top: 48px;
       right: 16px;
-      width: 280px;
+      width: 240px;
       background: var(--card-background-color, white);
       border: 1px solid var(--divider-color);
       border-radius: 12px;
