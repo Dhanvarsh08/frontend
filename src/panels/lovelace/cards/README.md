@@ -29,9 +29,9 @@ This update introduces a fully polished, production-ready **filter panel, sort p
 - **Real-world task management** – Most users assign priorities and due dates in their todo lists. Without filtering/sorting, long lists become overwhelming and important tasks get buried.
 - **Focus on what matters today** – Quickly hide completed/low-priority items or show only tasks due this week.
 - **Power-user productivity** – Users with 50+ items can now instantly surface urgent/overdue tasks instead of scrolling endlessly.
-- **Parity with modern todo apps** – Brings expected functionality (GTasks, Todoist, TickTick) into Home Assistant without leaving the dashboard.
+- **Parity with modern todo apps** – Brings Todoist functionality into Home Assistant without leaving the dashboard.
 
-These are not just nice-to-haves — they turn a simple list into a true personal task manager inside Lovelace.
+These are not just nice-to-haves, they turn a simple list into a true personal task manager inside Lovelace.
 
 ---
 
@@ -42,7 +42,6 @@ The implementation was deliberately built to be **easily extensible**:
 - All panel content is isolated in the `_renderMenu()` method → new panels (e.g. status, labels, projects) can be added with minimal changes.
 - Filter state lives in dedicated `@state()` properties → adding new filter types is just a new property + UI block.
 - Sort logic is centralized in `_sortItems()` and driven by a single `_sortMode` string → new sort criteria (due date, creation date, alphabetical, custom order) can be dropped in without touching the UI.
-- Uses native `<ha-dialog>` with `scrimClickAction`/`escapeKeyAction` → future HA dialog improvements are automatically inherited.
 - Calendar popups render via HA’s global `<popup-container>` → guaranteed to stay on top even after future frontend changes.
 - Clean separation of concerns and full TypeScript safety → safe for community contributions.
 
