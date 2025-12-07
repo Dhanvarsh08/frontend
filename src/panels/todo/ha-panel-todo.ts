@@ -1,4 +1,4 @@
-import { ResizeController } from "@lit-labs/observers/resize-controller";
+import { ResizeController } from "@lit-labs/observers/resize-controller"; 
 import {
   mdiChevronDown,
   mdiChevronLeft,
@@ -94,6 +94,12 @@ class PanelTodo extends LitElement {
 
   @state() private _labelItems: any[] = [];
 
+  @state() private _allLabelItems: any[] = [];
+
+  private _labelsUnsub: (() => void)[] = [];
+
+  private _labelsItemsByEntity: Record<string, any[]> = {};
+
   public connectedCallback() {
     super.connectedCallback();
     this._mql = window.matchMedia(
@@ -133,11 +139,7 @@ class PanelTodo extends LitElement {
           // Default base list for labels if opened directly
           this._labelsEntityId = getTodoLists(this.hass)[0]?.entity_id;
         }
-
-        return;
-      }
-
-      if (urlEntityId) {
+      } else if (urlEntityId) {
         this._entityId = urlEntityId;
       } else {
         if (
@@ -161,12 +163,20 @@ class PanelTodo extends LitElement {
         this._selectedLabel = null;
         this._labelItems = [];
         this._labelsEntityId = undefined;
+        this._allLabelItems = [];
+        this._labelsUnsub.forEach((unsub) => unsub());
+        this._labelsUnsub = [];
+        this._labelsItemsByEntity = {};
       }
       this._setupTodoElement();
 
       // Ensure summary subscriptions if we just switched to summary
       if (this._entityId === "todo.summary") {
         this._subscribeAllLists();
+      }
+
+      if (this._entityId === "todo.labels") {
+        this._subscribeLabelsAllLists();
       }
     }
   }
@@ -246,6 +256,21 @@ class PanelTodo extends LitElement {
         ></ha-svg-icon>
         Summary of Tasks
       </ha-list-item>`,
+      this.hass.user?.is_admin
+        ? html`<ha-list-item
+            graphic="icon"
+            @click=${this._showLabels}
+            data-entity-id="todo.labels"
+            .entityId=${"todo.labels"}
+            .activated=${this._entityId === "todo.labels"}
+          >
+            <ha-svg-icon
+              slot="graphic"
+              .path=${mdiLabelOutline}
+            ></ha-svg-icon>
+            Labels
+          </ha-list-item>`
+        : nothing,
     ];
 
     const headerTitle =
@@ -295,13 +320,6 @@ class PanelTodo extends LitElement {
                           slot="graphic"
                         ></ha-svg-icon>
                         ${this.hass.localize("ui.panel.todo.create_list")}
-                      </ha-list-item>
-                      <ha-list-item graphic="icon" @click=${this._showLabels}>
-                        <ha-svg-icon
-                          .path=${mdiLabelOutline}
-                          slot="graphic"
-                        ></ha-svg-icon>
-                        Labels
                       </ha-list-item>`
                   : nothing}
               </ha-button-menu>`
@@ -310,24 +328,13 @@ class PanelTodo extends LitElement {
         <ha-list slot="pane" activatable>${listItems}</ha-list>
         ${showPane && this.hass.user?.is_admin
           ? html`<ha-list-item
-                graphic="icon"
-                slot="pane-footer"
-                @click=${this._addList}
-              >
-                <ha-svg-icon .path=${mdiPlus} slot="graphic"></ha-svg-icon>
-                ${this.hass.localize("ui.panel.todo.create_list")}
-              </ha-list-item>
-              <ha-list-item
-                graphic="icon"
-                slot="pane-footer"
-                @click=${this._showLabels}
-              >
-                <ha-svg-icon
-                  .path=${mdiLabelOutline}
-                  slot="graphic"
-                ></ha-svg-icon>
-                Labels
-              </ha-list-item>`
+              graphic="icon"
+              slot="pane-footer"
+              @click=${this._addList}
+            >
+              <ha-svg-icon .path=${mdiPlus} slot="graphic"></ha-svg-icon>
+              ${this.hass.localize("ui.panel.todo.create_list")}
+            </ha-list-item>`
           : nothing}
         <ha-button-menu slot="actionItems">
           <ha-icon-button
@@ -415,6 +422,10 @@ class PanelTodo extends LitElement {
     const picked = (ev.currentTarget as any).dataset.entityId;
     if (picked === "todo.summary") {
       this._entityId = "todo.summary";
+      return;
+    }
+    if (picked === "todo.labels") {
+      this._entityId = "todo.labels";
       return;
     }
     this._entityId = (ev.currentTarget as any).entityId;
@@ -531,11 +542,14 @@ class PanelTodo extends LitElement {
     return getTodoLists(this.hass)[0]?.entity_id;
   }
 
-  private async _fetchItemsForCurrentList(): Promise<any[]> {
+  private async _fetchItemsForCurrentList(
+    entityIdOverride?: string
+  ): Promise<any[]> {
     const entityId =
-      this._entityId === "todo.labels"
+      entityIdOverride ??
+      (this._entityId === "todo.labels"
         ? this._getLabelsBaseEntityId()
-        : this._entityId;
+        : this._entityId);
 
     if (!entityId) {
       return [];
@@ -564,52 +578,91 @@ class PanelTodo extends LitElement {
     }
   }
 
-  private async _showLabels(): Promise<void> {
-    // If already in labels mode, toggle back to base list
-    if (this._entityId === "todo.labels") {
-      const backTo =
-        this._labelsEntityId ?? getTodoLists(this.hass)[0]?.entity_id;
+  private async _subscribeLabelsAllLists() {
+    this._labelsUnsub.forEach((unsub) => unsub());
+    this._labelsUnsub = [];
+    this._labelsItemsByEntity = {};
+
+    const lists = getTodoLists(this.hass);
+    if (!lists.length) {
       this._labels = [];
       this._selectedLabel = null;
       this._labelItems = [];
       this._labelsEntityId = undefined;
-      this._entityId = backTo;
-      if (backTo) {
-        navigate(
-          constructUrlCurrentPath(createSearchParam({ entity_id: backTo })),
-          { replace: true }
-        );
+      this._allLabelItems = [];
+      return;
+    }
+
+    const currentBase =
+      this._entityId &&
+      this._entityId !== "todo.summary" &&
+      this._entityId !== "todo.labels"
+        ? this._entityId
+        : lists[0]?.entity_id;
+
+    this._labelsEntityId = currentBase;
+
+    const promises = lists.map(async (list) => {
+      const entityId = list.entity_id;
+
+      const unsub = await subscribeItems(this.hass, entityId, (update) => {
+        this._labelsItemsByEntity[entityId] = update.items || [];
+        this._rebuildLabelsFromSubscribed();
+      });
+
+      return unsub;
+    });
+
+    this._labelsUnsub = await Promise.all(promises);
+    this._rebuildLabelsFromSubscribed();
+  }
+
+  private _rebuildLabelsFromSubscribed() {
+    const lists = getTodoLists(this.hass);
+    const labelSet = new Set<string>();
+    let allItems: any[] = [];
+
+    for (const list of lists) {
+      const entityId = list.entity_id;
+      const entityState = this.hass.states[entityId];
+
+      const availableLabels = (
+        (entityState?.attributes?.available_labels as string[]) ?? []
+      ).filter((lbl) => lbl && lbl.trim());
+
+      for (const lbl of availableLabels) {
+        const s = String(lbl).trim();
+        if (s) {
+          labelSet.add(s);
+        }
       }
-      return;
+
+      const items = this._labelsItemsByEntity[entityId] || [];
+      if (!items.length) {
+        continue;
+      }
+
+      const enriched = items.map((item) => ({
+        ...item,
+        __entity_id: entityId,
+      }));
+
+      allItems = allItems.concat(enriched);
     }
 
-    const baseId = this._getLabelsBaseEntityId();
-    if (!baseId) {
-      return;
-    }
-
-    this._labelsEntityId = baseId;
-
-    const entityState = this.hass.states[baseId];
-
-    // Prefer available_labels attribute if backend provides it
-    let labels: string[] = (
-      (entityState?.attributes?.available_labels as string[]) ?? []
-    ).filter((lbl) => lbl && lbl.trim());
-
-    // Fallback: derive labels from items fetched via websocket
-    if (!labels.length) {
-      const items = await this._fetchItemsForCurrentList();
-      const labelSet = new Set<string>();
-
-      for (const item of items) {
+    if (!labelSet.size && allItems.length) {
+      for (const item of allItems) {
         const l = (item as any).labels;
-        if (!l) continue;
+        if (!l) {
+          continue;
+        }
 
         if (Array.isArray(l)) {
           for (const v of l) {
             const s = String(v).trim();
-            if (s) labelSet.add(s);
+            if (s) {
+              labelSet.add(s);
+            }
           }
         } else if (typeof l === "string") {
           l.split(",")
@@ -618,19 +671,26 @@ class PanelTodo extends LitElement {
             .forEach((s) => labelSet.add(s));
         }
       }
-
-      labels = Array.from(labelSet);
     }
 
-    this._labels = labels;
-    this._selectedLabel = null;
-    this._labelItems = [];
+    this._allLabelItems = allItems;
+    this._labels = Array.from(labelSet);
+
+    if (this._selectedLabel) {
+      this._labelItems = this._allLabelItems.filter((item) =>
+        this._itemHasLabel(item, this._selectedLabel as string)
+      );
+    } else {
+      this._labelItems = [];
+    }
+  }
+
+  private async _showLabels(): Promise<void> {
+    if (this._entityId === "todo.labels") {
+      return;
+    }
 
     this._entityId = "todo.labels";
-    navigate(
-      constructUrlCurrentPath(createSearchParam({ entity_id: "todo.labels" })),
-      { replace: true }
-    );
   }
 
   private async _onLabelRowClick(ev: Event): Promise<void> {
@@ -642,10 +702,9 @@ class PanelTodo extends LitElement {
     }
 
     this._selectedLabel = label;
-    this._labelItems = [];
-
-    const items = await this._fetchItemsForCurrentList();
-    this._labelItems = items.filter((item) => this._itemHasLabel(item, label));
+    this._labelItems = this._allLabelItems.filter((item) =>
+      this._itemHasLabel(item, label)
+    );
   }
 
   private _backToLabels(): void {
@@ -679,11 +738,6 @@ class PanelTodo extends LitElement {
   }
 
   private _editItem(ev: Event): void {
-    const baseId = this._getLabelsBaseEntityId();
-    if (!baseId) {
-      return;
-    }
-
     const target = ev.currentTarget as any;
     const item = target.item;
 
@@ -691,7 +745,14 @@ class PanelTodo extends LitElement {
       return;
     }
 
-    showTodoItemEditDialog(this, { entity: baseId, item });
+    const entityId =
+      (item as any).__entity_id || this._getLabelsBaseEntityId();
+
+    if (!entityId) {
+      return;
+    }
+
+    showTodoItemEditDialog(this, { entity: entityId, item });
   }
 
   private async _addList(): Promise<void> {
