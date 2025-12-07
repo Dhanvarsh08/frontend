@@ -47,6 +47,8 @@ class DialogTodoItemEditor extends LitElement {
 
   @state() private _submitting = false;
 
+  @state() private _labels = "";
+
   // Dates are manipulated and displayed in the browser timezone
   // which may be different from the Home Assistant timezone. When
   // events are persisted, they are relative to the Home Assistant
@@ -69,10 +71,18 @@ class DialogTodoItemEditor extends LitElement {
       this._due = entry.due
         ? new Date(this._hasTime ? entry.due : `${entry.due}T00:00:00`)
         : undefined;
+
+      const rawLabels = (entry as any).labels;
+      if (Array.isArray(rawLabels)) {
+        this._labels = rawLabels.join(", ");
+      } else {
+        this._labels = rawLabels || "";
+      }
     } else {
       this._hasTime = false;
       this._checked = false;
       this._due = undefined;
+      this._labels = "";
     }
   }
 
@@ -86,6 +96,7 @@ class DialogTodoItemEditor extends LitElement {
     this._summary = "";
     this._description = "";
     this._hasTime = false;
+    this._labels = "";
     fireEvent(this, "dialog-closed", { dialog: this.localName });
   }
 
@@ -135,6 +146,15 @@ class DialogTodoItemEditor extends LitElement {
                 "ui.common.error_required"
               )}
               dialogInitialFocus
+              .disabled=${!canUpdate}
+            ></ha-textfield>
+
+            <ha-textfield
+              class="labels"
+              name="labels"
+              .label=${"Labels"}
+              .value=${this._labels}
+              @input=${this._handleLabelChanged}
               .disabled=${!canUpdate}
             ></ha-textfield>
           </div>
@@ -271,7 +291,21 @@ class DialogTodoItemEditor extends LitElement {
     this._description = ev.target.value;
   }
 
-  private _dueDateChanged(ev: CustomEvent) {
+  private _handleLabelChanged(ev) {
+    this._labels = ev.target.value;
+  }
+
+  private _labelsStringToArray(value: string): string[] | undefined {
+    if (!value) {
+      return undefined;
+    }
+    return value
+      .split(",")
+      .map((p) => p.trim())
+      .filter((p) => p.length > 0);
+  }
+
+  private _dueDateChanged(ev: CustomEvent<{ value?: string }>) {
     if (!ev.detail.value) {
       this._due = undefined;
       return;
@@ -305,6 +339,7 @@ class DialogTodoItemEditor extends LitElement {
             ? this._due.toISOString()
             : this._formatDate(this._due)
           : undefined,
+        labels: this._labelsStringToArray(this._labels),
       });
     } catch (err: any) {
       this._error = err ? err.message : "Unknown error";
@@ -352,6 +387,7 @@ class DialogTodoItemEditor extends LitElement {
         status: this._checked
           ? TodoItemStatus.Completed
           : TodoItemStatus.NeedsAction,
+        labels: this._labelsStringToArray(this._labels),
       });
     } catch (err: any) {
       this._error = err ? err.message : "Unknown error";

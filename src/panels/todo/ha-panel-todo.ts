@@ -1,11 +1,13 @@
 import { ResizeController } from "@lit-labs/observers/resize-controller";
 import {
   mdiChevronDown,
+  mdiChevronLeft,
   mdiCommentProcessingOutline,
   mdiDelete,
   mdiDotsVertical,
   mdiInformationOutline,
   mdiPlus,
+  mdiLabelOutline,
 } from "@mdi/js";
 import type { CSSResultGroup, PropertyValues, TemplateResult } from "lit";
 import { LitElement, css, html, nothing } from "lit";
@@ -31,6 +33,7 @@ import "../../components/ha-menu-button";
 import "../../components/ha-state-icon";
 import "../../components/ha-svg-icon";
 import "../../components/ha-two-pane-top-app-bar-fixed";
+import "../../components/ha-checkbox";
 import { deleteConfigEntry } from "../../data/config_entries";
 import { getExtendedEntityRegistryEntry } from "../../data/entity_registry";
 import { fetchIntegrationManifest } from "../../data/integration";
@@ -82,12 +85,21 @@ class PanelTodo extends LitElement {
     isComponentLoaded(this.hass, "conversation")
   );
 
+  // Labels state
+  @state() private _labelsEntityId?: string; // which list labels belong to
+
+  @state() private _labels: string[] = [];
+
+  @state() private _selectedLabel: string | null = null;
+
+  @state() private _labelItems: any[] = [];
+
   public connectedCallback() {
     super.connectedCallback();
     this._mql = window.matchMedia(
       "(max-width: 450px), all and (max-height: 500px)"
     );
-    this._mql.addListener(this._setIsMobile);
+    this._mql.addEventListener("change", this._setIsMobile);
     this.mobile = this._mql.matches;
     const computedStyles = getComputedStyle(this);
     this._headerHeight = Number(
@@ -97,7 +109,7 @@ class PanelTodo extends LitElement {
 
   public disconnectedCallback() {
     super.disconnectedCallback();
-    this._mql?.removeListener(this._setIsMobile!);
+    this._mql?.removeEventListener("change", this._setIsMobile!);
     this._mql = undefined;
   }
 
@@ -113,8 +125,15 @@ class PanelTodo extends LitElement {
 
       const urlEntityId = extractSearchParam("entity_id");
 
-      if (urlEntityId === "todo.summary") {
-        this._entityId = "todo.summary";
+      if (urlEntityId === "todo.summary" || urlEntityId === "todo.labels") {
+        // Special synthetic views
+        this._entityId = urlEntityId;
+
+        if (urlEntityId === "todo.labels" && !this._labelsEntityId) {
+          // Default base list for labels if opened directly
+          this._labelsEntityId = getTodoLists(this.hass)[0]?.entity_id;
+        }
+
         return;
       }
 
@@ -124,6 +143,7 @@ class PanelTodo extends LitElement {
         if (
           this._entityId &&
           this._entityId !== "todo.summary" &&
+          this._entityId !== "todo.labels" &&
           !(this._entityId in this.hass.states)
         ) {
           this._entityId = undefined;
@@ -135,15 +155,27 @@ class PanelTodo extends LitElement {
     }
 
     if (changedProperties.has("_entityId") || !this.hasUpdated) {
+      // Reset labels state when leaving labels mode
+      if (this._entityId !== "todo.labels") {
+        this._labels = [];
+        this._selectedLabel = null;
+        this._labelItems = [];
+        this._labelsEntityId = undefined;
+      }
       this._setupTodoElement();
+
+      // Ensure summary subscriptions if we just switched to summary
+      if (this._entityId === "todo.summary") {
+        this._subscribeAllLists();
+      }
     }
   }
 
   private _setupTodoElement(): void {
-    if (this._entityId === "todo.summary") {
+    if (this._entityId === "todo.summary" || this._entityId === "todo.labels") {
       navigate(
         constructUrlCurrentPath(
-          createSearchParam({ entity_id: "todo.summary" })
+          createSearchParam({ entity_id: this._entityId })
         ),
         { replace: true }
       );
@@ -167,12 +199,20 @@ class PanelTodo extends LitElement {
   );
 
   protected render(): TemplateResult {
-    const entityRegistryEntry = this._entityId
-      ? this.hass.entities[this._entityId]
-      : undefined;
-    const entityState = this._entityId
-      ? this.hass.states[this._entityId]
-      : undefined;
+    const entityRegistryEntry =
+      this._entityId &&
+      this._entityId !== "todo.summary" &&
+      this._entityId !== "todo.labels"
+        ? this.hass.entities[this._entityId]
+        : undefined;
+
+    const entityState =
+      this._entityId &&
+      this._entityId !== "todo.summary" &&
+      this._entityId !== "todo.labels"
+        ? this.hass.states[this._entityId]
+        : undefined;
+
     const showPane = this._showPaneController.value ?? !this.narrow;
     const todoLists = getTodoLists(this.hass);
 
@@ -207,6 +247,18 @@ class PanelTodo extends LitElement {
         Summary of Tasks
       </ha-list-item>`,
     ];
+
+    const headerTitle =
+      this._entityId === "todo.summary"
+        ? "Summary of Tasks"
+        : this._entityId === "todo.labels"
+          ? this.hass.localize("ui.panel.todo.labels") || "Labels"
+          : this._entityId
+            ? entityState
+              ? computeStateName(entityState)
+              : this._entityId
+            : "";
+
     return html`
       <ha-two-pane-top-app-bar-fixed
         .pane=${showPane}
@@ -231,13 +283,7 @@ class PanelTodo extends LitElement {
                 .x=${this.mobile ? 0 : undefined}
               >
                 <ha-button slot="trigger">
-                  <div>
-                    ${this._entityId
-                      ? entityState
-                        ? computeStateName(entityState)
-                        : this._entityId
-                      : ""}
-                  </div>
+                  <div>${headerTitle}</div>
                   <ha-svg-icon slot="end" .path=${mdiChevronDown}></ha-svg-icon>
                 </ha-button>
                 ${listItems}
@@ -249,21 +295,39 @@ class PanelTodo extends LitElement {
                           slot="graphic"
                         ></ha-svg-icon>
                         ${this.hass.localize("ui.panel.todo.create_list")}
+                      </ha-list-item>
+                      <ha-list-item graphic="icon" @click=${this._showLabels}>
+                        <ha-svg-icon
+                          .path=${mdiLabelOutline}
+                          slot="graphic"
+                        ></ha-svg-icon>
+                        Labels
                       </ha-list-item>`
                   : nothing}
               </ha-button-menu>`
-            : this.hass.localize("panel.todo")}
+            : headerTitle}
         </div>
         <ha-list slot="pane" activatable>${listItems}</ha-list>
         ${showPane && this.hass.user?.is_admin
           ? html`<ha-list-item
-              graphic="icon"
-              slot="pane-footer"
-              @click=${this._addList}
-            >
-              <ha-svg-icon .path=${mdiPlus} slot="graphic"></ha-svg-icon>
-              ${this.hass.localize("ui.panel.todo.create_list")}
-            </ha-list-item>`
+                graphic="icon"
+                slot="pane-footer"
+                @click=${this._addList}
+              >
+                <ha-svg-icon .path=${mdiPlus} slot="graphic"></ha-svg-icon>
+                ${this.hass.localize("ui.panel.todo.create_list")}
+              </ha-list-item>
+              <ha-list-item
+                graphic="icon"
+                slot="pane-footer"
+                @click=${this._showLabels}
+              >
+                <ha-svg-icon
+                  .path=${mdiLabelOutline}
+                  slot="graphic"
+                ></ha-svg-icon>
+                Labels
+              </ha-list-item>`
           : nothing}
         <ha-button-menu slot="actionItems">
           <ha-icon-button
@@ -275,7 +339,9 @@ class PanelTodo extends LitElement {
             ? html`<ha-list-item
                 graphic="icon"
                 @click=${this._showMoreInfoDialog}
-                .disabled=${!this._entityId}
+                .disabled=${!this._entityId ||
+                this._entityId === "todo.summary" ||
+                this._entityId === "todo.labels"}
               >
                 <ha-svg-icon .path=${mdiInformationOutline} slot="graphic">
                 </ha-svg-icon>
@@ -307,19 +373,12 @@ class PanelTodo extends LitElement {
             : nothing}
         </ha-button-menu>
         <div id="columns">
-          <div class="column">
-            ${this._entityId === "todo.summary"
-              ? this._renderSummary()
-              : html`
-                  <hui-card
-                    .hass=${this.hass}
-                    .config=${this._cardConfig(this._entityId!)}
-                  ></hui-card>
-                `}
-          </div>
+          <div class="column">${this._renderMainView()}</div>
         </div>
         ${entityState &&
-        supportsFeature(entityState, TodoListEntityFeature.CREATE_TODO_ITEM)
+        supportsFeature(entityState, TodoListEntityFeature.CREATE_TODO_ITEM) &&
+        this._entityId !== "todo.summary" &&
+        this._entityId !== "todo.labels"
           ? html`<ha-fab
               .label=${this.hass.localize("ui.panel.todo.add_item")}
               extended
@@ -332,14 +391,307 @@ class PanelTodo extends LitElement {
     `;
   }
 
-  private _handleEntityPicked(ev) {
-    const picked = ev.currentTarget.dataset.entityId;
+  private _renderMainView(): TemplateResult {
+    if (this._entityId === "todo.summary") {
+      return this._renderSummary();
+    }
+    if (this._entityId === "todo.labels") {
+      return this._selectedLabel
+        ? this._renderLabelItemsView()
+        : this._renderLabelsView();
+    }
+    if (!this._entityId) {
+      return nothing;
+    }
+    return html`
+      <hui-card
+        .hass=${this.hass}
+        .config=${this._cardConfig(this._entityId)}
+      ></hui-card>
+    `;
+  }
+
+  private _handleEntityPicked(ev: Event) {
+    const picked = (ev.currentTarget as any).dataset.entityId;
     if (picked === "todo.summary") {
       this._entityId = "todo.summary";
-      this._subscribeAllLists();
       return;
     }
-    this._entityId = ev.currentTarget.entityId;
+    this._entityId = (ev.currentTarget as any).entityId;
+  }
+
+  private _renderLabelsView(): TemplateResult {
+    const labels = this._labels;
+
+    return html`
+      <div class="labels-column">
+        <h3 class="labels-title">
+          ${this.hass.localize("ui.panel.todo.labels") || "Labels"}
+        </h3>
+
+        ${labels.length
+          ? html`
+              <ha-list>
+                ${labels.map(
+                  (label) => html`
+                    <ha-list-item
+                      graphic="icon"
+                      hasMeta
+                      .labelValue=${label}
+                      @click=${this._onLabelRowClick}
+                    >
+                      <ha-svg-icon
+                        slot="graphic"
+                        .path=${mdiLabelOutline}
+                      ></ha-svg-icon>
+                      <span class="label-name">${label}</span>
+                    </ha-list-item>
+                  `
+                )}
+              </ha-list>
+            `
+          : html`<div class="labels-empty">
+              No labels available for this list.
+            </div>`}
+      </div>
+    `;
+  }
+
+  private _renderLabelItemsView(): TemplateResult {
+    const label = this._selectedLabel;
+    if (!label) {
+      return nothing;
+    }
+
+    const filtered = this._labelItems;
+
+    return html`
+      <div class="labels-column">
+        <div class="label-items-header">
+          <ha-icon-button
+            .path=${mdiChevronLeft}
+            .label=${this.hass.localize("ui.common.back") || "Back"}
+            @click=${this._backToLabels}
+          ></ha-icon-button>
+          <h3 class="labels-title">${label}</h3>
+        </div>
+
+        ${filtered.length
+          ? html`
+              <ha-list>
+                ${filtered.map((item) => {
+                  const completed = this._isItemCompleted(item);
+                  return html`
+                    <ha-list-item
+                      graphic="control"
+                      .item=${item}
+                      @click=${this._editItem}
+                    >
+                      <ha-checkbox
+                        slot="graphic"
+                        .checked=${completed}
+                        disabled
+                      ></ha-checkbox>
+                      <div class="label-item-main">
+                        <div
+                          class=${`label-item-summary${
+                            completed ? " label-item-completed" : ""
+                          }`}
+                        >
+                          ${item.summary}
+                        </div>
+                        ${item.description
+                          ? html`<div class="label-item-secondary">
+                              ${item.description}
+                            </div>`
+                          : nothing}
+                      </div>
+                    </ha-list-item>
+                  `;
+                })}
+              </ha-list>
+            `
+          : html`<div class="labels-empty">No items have this label.</div>`}
+      </div>
+    `;
+  }
+
+  private _getLabelsBaseEntityId(): string | undefined {
+    if (this._labelsEntityId) {
+      return this._labelsEntityId;
+    }
+    if (
+      this._entityId &&
+      this._entityId !== "todo.summary" &&
+      this._entityId !== "todo.labels" &&
+      this._entityId in this.hass.states
+    ) {
+      return this._entityId;
+    }
+    return getTodoLists(this.hass)[0]?.entity_id;
+  }
+
+  private async _fetchItemsForCurrentList(): Promise<any[]> {
+    const entityId =
+      this._entityId === "todo.labels"
+        ? this._getLabelsBaseEntityId()
+        : this._entityId;
+
+    if (!entityId) {
+      return [];
+    }
+
+    try {
+      const result = await this.hass.connection.sendMessagePromise<{
+        items: any[];
+      }>({
+        type: "todo/item/list",
+        entity_id: entityId,
+      });
+
+      return result?.items ?? [];
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error("Failed to fetch todo items via websocket", err);
+      await showAlertDialog(this, {
+        title: this.hass.localize("ui.common.error") || "Error",
+        text:
+          (err as any)?.message ||
+          String(err) ||
+          "Failed to load items for this list.",
+      });
+      return [];
+    }
+  }
+
+  private async _showLabels(): Promise<void> {
+    // If already in labels mode, toggle back to base list
+    if (this._entityId === "todo.labels") {
+      const backTo =
+        this._labelsEntityId ?? getTodoLists(this.hass)[0]?.entity_id;
+      this._labels = [];
+      this._selectedLabel = null;
+      this._labelItems = [];
+      this._labelsEntityId = undefined;
+      this._entityId = backTo;
+      if (backTo) {
+        navigate(
+          constructUrlCurrentPath(createSearchParam({ entity_id: backTo })),
+          { replace: true }
+        );
+      }
+      return;
+    }
+
+    const baseId = this._getLabelsBaseEntityId();
+    if (!baseId) {
+      return;
+    }
+
+    this._labelsEntityId = baseId;
+
+    const entityState = this.hass.states[baseId];
+
+    // Prefer available_labels attribute if backend provides it
+    let labels: string[] = (
+      (entityState?.attributes?.available_labels as string[]) ?? []
+    ).filter((lbl) => lbl && lbl.trim());
+
+    // Fallback: derive labels from items fetched via websocket
+    if (!labels.length) {
+      const items = await this._fetchItemsForCurrentList();
+      const labelSet = new Set<string>();
+
+      for (const item of items) {
+        const l = (item as any).labels;
+        if (!l) continue;
+
+        if (Array.isArray(l)) {
+          for (const v of l) {
+            const s = String(v).trim();
+            if (s) labelSet.add(s);
+          }
+        } else if (typeof l === "string") {
+          l.split(",")
+            .map((p) => p.trim())
+            .filter(Boolean)
+            .forEach((s) => labelSet.add(s));
+        }
+      }
+
+      labels = Array.from(labelSet);
+    }
+
+    this._labels = labels;
+    this._selectedLabel = null;
+    this._labelItems = [];
+
+    this._entityId = "todo.labels";
+    navigate(
+      constructUrlCurrentPath(createSearchParam({ entity_id: "todo.labels" })),
+      { replace: true }
+    );
+  }
+
+  private async _onLabelRowClick(ev: Event): Promise<void> {
+    const target = ev.currentTarget as any;
+    const label = target.labelValue as string;
+
+    if (!label) {
+      return;
+    }
+
+    this._selectedLabel = label;
+    this._labelItems = [];
+
+    const items = await this._fetchItemsForCurrentList();
+    this._labelItems = items.filter((item) => this._itemHasLabel(item, label));
+  }
+
+  private _backToLabels(): void {
+    this._selectedLabel = null;
+    this._labelItems = [];
+  }
+
+  private _isItemCompleted(item: any): boolean {
+    const status = String(item.status || "").toLowerCase();
+    return status.includes("completed");
+  }
+
+  private _itemHasLabel(item: any, label: string): boolean {
+    const target = label.trim();
+    if (!target) return false;
+    const raw = (item as any).labels;
+    if (!raw) return false;
+
+    if (Array.isArray(raw)) {
+      return raw.some((v) => String(v).trim() === target);
+    }
+
+    if (typeof raw === "string") {
+      return raw
+        .split(",")
+        .map((p) => p.trim())
+        .includes(target);
+    }
+
+    return false;
+  }
+
+  private _editItem(ev: Event): void {
+    const baseId = this._getLabelsBaseEntityId();
+    if (!baseId) {
+      return;
+    }
+
+    const target = ev.currentTarget as any;
+    const item = target.item;
+
+    if (!item) {
+      return;
+    }
+
+    showTodoItemEditDialog(this, { entity: baseId, item });
   }
 
   private async _addList(): Promise<void> {
@@ -351,14 +703,22 @@ class PanelTodo extends LitElement {
   }
 
   private _showMoreInfoDialog(): void {
-    if (!this._entityId) {
+    if (
+      !this._entityId ||
+      this._entityId === "todo.summary" ||
+      this._entityId === "todo.labels"
+    ) {
       return;
     }
     fireEvent(this, "hass-more-info", { entityId: this._entityId });
   }
 
   private async _deleteList(): Promise<void> {
-    if (!this._entityId) {
+    if (
+      !this._entityId ||
+      this._entityId === "todo.summary" ||
+      this._entityId === "todo.labels"
+    ) {
       return;
     }
 
@@ -484,55 +844,7 @@ class PanelTodo extends LitElement {
           <div class="analytics-card">
             <div class="analytics-title">Analytics</div>
 
-            <!-- PIE CHART SVG -->
-            ${(() => {
-              const completed = totalCompleted;
-              const needs = totalNeeds;
-              const remaining = total - completed - needs;
-
-              const totalSegments = completed + needs + remaining;
-              const pct = (v) => (v / totalSegments) * 100;
-
-              // stroke-dasharray values for circle segments
-              const c = pct(completed);
-              const n = pct(needs);
-              const r = pct(remaining);
-
-              return html`
-                <svg class="pie-chart" viewBox="-3 -3 38 38">
-                  <circle
-                    r="16"
-                    cx="16"
-                    cy="16"
-                    fill="transparent"
-                    stroke="var(--success-color)"
-                    stroke-width="4"
-                    stroke-dasharray="${c} ${100 - c}"
-                    transform="rotate(-90 16 16)"
-                  />
-                  <circle
-                    r="16"
-                    cx="16"
-                    cy="16"
-                    fill="transparent"
-                    stroke="var(--error-color)"
-                    stroke-width="4"
-                    stroke-dasharray="${n} ${100 - n}"
-                    transform="rotate(${(c / 100) * 360 - 90} 16 16)"
-                  />
-                  <circle
-                    r="16"
-                    cx="16"
-                    cy="16"
-                    fill="transparent"
-                    stroke="var(--primary-color)"
-                    stroke-width="4"
-                    stroke-dasharray="${r} ${100 - r}"
-                    transform="rotate(${((c + n) / 100) * 360 - 90} 16 16)"
-                  />
-                </svg>
-              `;
-            })()}
+            ${this._renderAnalyticsPie(totalNeeds, totalCompleted, total)}
 
             <!-- LEGEND -->
             <div class="legend">
@@ -548,6 +860,59 @@ class PanelTodo extends LitElement {
           </div>
         </div>
       </ha-card>
+    `;
+  }
+
+  private _renderAnalyticsPie(
+    totalNeeds: number,
+    totalCompleted: number,
+    total: number
+  ): TemplateResult {
+    const completed = totalCompleted;
+    const needs = totalNeeds;
+    const remainingRaw = total - completed - needs;
+    const remaining = remainingRaw > 0 ? remainingRaw : 0;
+
+    const totalSegments = completed + needs + remaining || 1;
+    const pct = (v: number) => (v / totalSegments) * 100;
+
+    const c = pct(completed);
+    const n = pct(needs);
+    const r = pct(remaining);
+
+    return html`
+      <svg class="pie-chart" viewBox="-3 -3 38 38">
+        <circle
+          r="16"
+          cx="16"
+          cy="16"
+          fill="transparent"
+          stroke="var(--success-color)"
+          stroke-width="4"
+          stroke-dasharray="${c} ${100 - c}"
+          transform="rotate(-90 16 16)"
+        />
+        <circle
+          r="16"
+          cx="16"
+          cy="16"
+          fill="transparent"
+          stroke="var(--error-color)"
+          stroke-width="4"
+          stroke-dasharray="${n} ${100 - n}"
+          transform="rotate(${(c / 100) * 360 - 90} 16 16)"
+        />
+        <circle
+          r="16"
+          cx="16"
+          cy="16"
+          fill="transparent"
+          stroke="var(--primary-color)"
+          stroke-width="4"
+          stroke-dasharray="${r} ${100 - r}"
+          transform="rotate(${((c + n) / 100) * 360 - 90} 16 16)"
+        />
+      </svg>
     `;
   }
 
@@ -582,9 +947,6 @@ class PanelTodo extends LitElement {
         }
         ha-button-menu {
           max-width: 100%;
-        }
-        ha-button-menu ha-button {
-          --ha-font-size-m: var(--ha-font-size-l);
         }
         ha-button-menu ha-button div {
           text-overflow: ellipsis;
@@ -713,6 +1075,49 @@ class PanelTodo extends LitElement {
           border-radius: 3px;
           margin-right: 8px;
           display: inline-block;
+        }
+
+        .labels-column {
+          max-width: 500px;
+        }
+        .labels-title {
+          margin: 0 0 8px;
+          font-size: var(--ha-font-size-l);
+          font-weight: var(--ha-font-weight-medium);
+        }
+        .labels-empty {
+          color: var(--secondary-text-color);
+          font-size: var(--ha-font-size-m);
+        }
+        .label-name {
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+        .label-items-header {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          margin-bottom: 8px;
+        }
+        .label-item-main {
+          display: flex;
+          flex-direction: column;
+          gap: 2px;
+        }
+        .label-item-summary {
+          font-weight: var(--ha-font-weight-medium);
+        }
+        .label-item-completed {
+          text-decoration: line-through;
+          color: var(--secondary-text-color);
+        }
+        .label-item-secondary {
+          color: var(--secondary-text-color);
+          font-size: var(--ha-font-size-s);
+        }
+        .warning {
+          color: var(--error-color);
         }
       `,
     ];
