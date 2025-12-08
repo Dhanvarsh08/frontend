@@ -29,6 +29,7 @@ export interface TodoItem {
   description?: string | null;
   due?: string | null;
   priority?: number | null;
+  labels?: string[] | string | null;
 }
 
 export const enum TodoListEntityFeature {
@@ -59,6 +60,26 @@ export interface TodoItems {
   items: TodoItem[];
 }
 
+const normalizeLabelsForService = (
+  labels: string[] | string | null | undefined
+): string[] | undefined => {
+  if (labels == null) {
+    return undefined;
+  }
+
+  if (Array.isArray(labels)) {
+    return labels
+      .map((l) => l.trim())
+      .filter((l) => l.length > 0);
+  }
+
+  // string: treat as comma-separated
+  return labels
+    .split(",")
+    .map((p) => p.trim())
+    .filter((p) => p.length > 0);
+};
+
 export const fetchItems = async (
   hass: HomeAssistant,
   entity_id: string
@@ -67,7 +88,23 @@ export const fetchItems = async (
     type: "todo/item/list",
     entity_id,
   });
-  return result.items;
+
+  return result.items.map((item) => {
+    if (
+      item.labels == null ||
+      Array.isArray(item.labels)
+    ) {
+      return item;
+    }
+
+    return {
+      ...item,
+      labels: item.labels
+        .split(",")
+        .map((p) => p.trim())
+        .filter((p) => p.length > 0),
+    };
+  });
 };
 
 export const subscribeItems = (
@@ -98,6 +135,7 @@ export const updateItem = (
         item.due === undefined || item.due?.includes("T")
           ? undefined
           : item.due,
+      labels: normalizeLabelsForService(item.labels),
     },
     { entity_id }
   );
@@ -118,6 +156,7 @@ export const createItem = (
         item.due === undefined || item.due?.includes("T")
           ? undefined
           : item.due,
+      labels: normalizeLabelsForService(item.labels),
     },
     { entity_id }
   );
