@@ -1,13 +1,14 @@
-import { ResizeController } from "@lit-labs/observers/resize-controller"; 
+import { ResizeController } from "@lit-labs/observers/resize-controller";
 import {
   mdiChevronDown,
   mdiChevronLeft,
+  mdiClock,
   mdiCommentProcessingOutline,
   mdiDelete,
   mdiDotsVertical,
   mdiInformationOutline,
-  mdiPlus,
   mdiLabelOutline,
+  mdiPlus,
 } from "@mdi/js";
 import type { CSSResultGroup, PropertyValues, TemplateResult } from "lit";
 import { LitElement, css, html, nothing } from "lit";
@@ -25,6 +26,7 @@ import {
   extractSearchParam,
 } from "../../common/url/search-params";
 import "../../components/ha-button";
+import "../../components/ha-checkbox";
 import "../../components/ha-fab";
 import "../../components/ha-icon-button";
 import "../../components/ha-list";
@@ -33,7 +35,6 @@ import "../../components/ha-menu-button";
 import "../../components/ha-state-icon";
 import "../../components/ha-svg-icon";
 import "../../components/ha-two-pane-top-app-bar-fixed";
-import "../../components/ha-checkbox";
 import { deleteConfigEntry } from "../../data/config_entries";
 import { getExtendedEntityRegistryEntry } from "../../data/entity_registry";
 import { fetchIntegrationManifest } from "../../data/integration";
@@ -264,10 +265,7 @@ class PanelTodo extends LitElement {
             .entityId=${"todo.labels"}
             .activated=${this._entityId === "todo.labels"}
           >
-            <ha-svg-icon
-              slot="graphic"
-              .path=${mdiLabelOutline}
-            ></ha-svg-icon>
+            <ha-svg-icon slot="graphic" .path=${mdiLabelOutline}></ha-svg-icon>
             Labels
           </ha-list-item>`
         : nothing,
@@ -277,7 +275,7 @@ class PanelTodo extends LitElement {
       this._entityId === "todo.summary"
         ? "Summary of Tasks"
         : this._entityId === "todo.labels"
-          ? this.hass.localize("ui.panel.todo.labels") || "Labels"
+          ? this.hass.localize("ui.panel.todo.labels" as any) || "Labels"
           : this._entityId
             ? entityState
               ? computeStateName(entityState)
@@ -398,7 +396,7 @@ class PanelTodo extends LitElement {
     `;
   }
 
-  private _renderMainView(): TemplateResult {
+  private _renderMainView(): TemplateResult | typeof nothing {
     if (this._entityId === "todo.summary") {
       return this._renderSummary();
     }
@@ -437,7 +435,7 @@ class PanelTodo extends LitElement {
     return html`
       <div class="labels-column">
         <h3 class="labels-title">
-          ${this.hass.localize("ui.panel.todo.labels") || "Labels"}
+          ${this.hass.localize("ui.panel.todo.labels" as any) || "Labels"}
         </h3>
 
         ${labels.length
@@ -468,7 +466,7 @@ class PanelTodo extends LitElement {
     `;
   }
 
-  private _renderLabelItemsView(): TemplateResult {
+  private _renderLabelItemsView(): TemplateResult | typeof nothing {
     const label = this._selectedLabel;
     if (!label) {
       return nothing;
@@ -492,6 +490,9 @@ class PanelTodo extends LitElement {
               <ha-list>
                 ${filtered.map((item) => {
                   const completed = this._isItemCompleted(item);
+                  const priorityClass = this._getPriorityClass(item.priority);
+                  const priorityLabel = this._getPriorityLabel(item.priority);
+
                   return html`
                     <ha-list-item
                       graphic="control"
@@ -505,17 +506,45 @@ class PanelTodo extends LitElement {
                       ></ha-checkbox>
                       <div class="label-item-main">
                         <div
-                          class=${`label-item-summary${
-                            completed ? " label-item-completed" : ""
-                          }`}
+                          class=${`label-item-summary${completed ? " label-item-completed" : ""}`}
                         >
                           ${item.summary}
                         </div>
+
                         ${item.description
-                          ? html`<div class="label-item-secondary">
+                          ? html`<div class="label-item-secondary description">
                               ${item.description}
                             </div>`
                           : nothing}
+
+                        <div class="label-item-meta">
+                          ${item.due
+                            ? html`<div
+                                  class="due ${this._isDueOverdue(item)
+                                    ? "overdue"
+                                    : ""}"
+                                >
+                                  <ha-svg-icon .path=${mdiClock}></ha-svg-icon>
+                                  ${this._isDueToday(item)
+                                    ? this.hass.localize(
+                                        "ui.panel.lovelace.cards.todo-list.today"
+                                      ) || "Today"
+                                    : html`<ha-relative-time
+                                        .hass=${this.hass}
+                                        .datetime=${this._getDueDateTime(item)}
+                                        capitalize
+                                      ></ha-relative-time>`}
+                                </div>
+                                <br /> `
+                            : nothing}
+                          ${item.priority != null
+                            ? html`<span
+                                class="summary priority ${priorityClass}"
+                              >
+                                Priority: ${priorityLabel}
+                              </span>`
+                            : nothing}
+                        </div>
                       </div>
                     </ha-list-item>
                   `;
@@ -542,40 +571,98 @@ class PanelTodo extends LitElement {
     return getTodoLists(this.hass)[0]?.entity_id;
   }
 
-  private async _fetchItemsForCurrentList(
-    entityIdOverride?: string
-  ): Promise<any[]> {
-    const entityId =
-      entityIdOverride ??
-      (this._entityId === "todo.labels"
-        ? this._getLabelsBaseEntityId()
-        : this._entityId);
+  private _getPriorityClass(
+    priority: number | string | null | undefined
+  ): string {
+    if (priority == null) return "priority-low";
 
-    if (!entityId) {
-      return [];
+    const p = Number(priority);
+    if (isNaN(p)) {
+      const str = String(priority).toLowerCase();
+      if (["low", "medium", "high", "urgent"].includes(str)) {
+        return `priority-${str}`;
+      }
     }
 
-    try {
-      const result = await this.hass.connection.sendMessagePromise<{
-        items: any[];
-      }>({
-        type: "todo/item/list",
-        entity_id: entityId,
-      });
-
-      return result?.items ?? [];
-    } catch (err) {
-      // eslint-disable-next-line no-console
-      console.error("Failed to fetch todo items via websocket", err);
-      await showAlertDialog(this, {
-        title: this.hass.localize("ui.common.error") || "Error",
-        text:
-          (err as any)?.message ||
-          String(err) ||
-          "Failed to load items for this list.",
-      });
-      return [];
+    // Map official todo integration numbers (1 = urgent, 4 = low)
+    switch (p) {
+      case 1:
+        return "priority-urgent";
+      case 2:
+        return "priority-high";
+      case 3:
+        return "priority-medium";
+      case 4:
+        return "priority-low";
+      default:
+        return "priority-low";
     }
+  }
+
+  private _getPriorityLabel(
+    priority: number | string | null | undefined
+  ): string {
+    if (priority == null) return "Low";
+
+    const p = Number(priority);
+    if (isNaN(p)) {
+      const str = String(priority).toLowerCase();
+      switch (str) {
+        case "urgent":
+          return "Urgent";
+        case "high":
+          return "High";
+        case "medium":
+          return "Medium";
+        case "low":
+          return "Low";
+      }
+    }
+
+    switch (p) {
+      case 1:
+        return "Urgent";
+      case 2:
+        return "High";
+      case 3:
+        return "Medium";
+      case 4:
+        return "Low";
+      default:
+        return "Low";
+    }
+  }
+
+  private _getDueDateTime(item: any): string {
+    return item.due || "";
+  }
+
+  private _isDueToday(item: any): boolean {
+    const due = this._getDueDateTime(item);
+    if (!due) return false;
+    const hasTime = due.includes("T");
+    const dueDate = new Date(hasTime ? due : due + "T00:00:00");
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    return (
+      dueDate.getFullYear() === today.getFullYear() &&
+      dueDate.getMonth() === today.getMonth() &&
+      dueDate.getDate() === today.getDate()
+    );
+  }
+
+  private _isDueOverdue(item: any): boolean {
+    const due = this._getDueDateTime(item);
+    if (!due) return false;
+    const hasTime = due.includes("T");
+    const dueDate = new Date(hasTime ? due : due + "T00:00:00");
+    const now = new Date();
+    if (hasTime) {
+      return dueDate < now;
+    }
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    return dueDate < today;
   }
 
   private async _subscribeLabelsAllLists() {
@@ -745,8 +832,7 @@ class PanelTodo extends LitElement {
       return;
     }
 
-    const entityId =
-      (item as any).__entity_id || this._getLabelsBaseEntityId();
+    const entityId = (item as any).__entity_id || this._getLabelsBaseEntityId();
 
     if (!entityId) {
       return;
@@ -1179,6 +1265,100 @@ class PanelTodo extends LitElement {
         }
         .warning {
           color: var(--error-color);
+        }
+        .label-item-meta {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 12px;
+          margin-top: 6px;
+          font-size: 0.8rem;
+          color: var(--secondary-text-color);
+        }
+
+        .label-item-meta span {
+          opacity: 0.9;
+        }
+
+        .due-date::before {
+          content: "calendar";
+          margin-right: 4px;
+          opacity: 0.7;
+        }
+
+        .priority {
+          font-weight: 600;
+        }
+
+        .priority-1 {
+          color: var(--error-color);
+        }
+        .priority-2 {
+          color: var(--warning-color);
+        }
+        .priority-3 {
+          color: var(--info-color);
+        }
+        .priority-4 {
+          color: var(--success-color);
+        }
+
+        .created-date::before {
+          content: "plus";
+          margin-right: 4px;
+          opacity: 0.7;
+        }
+
+        .description {
+          margin-bottom: 4px;
+        }
+
+        .priority-urgent {
+          color: #db4437 !important;
+          font-weight: 600 !important;
+        }
+        .priority-high {
+          color: #ff9800 !important;
+          font-weight: 600 !important;
+        }
+        .priority-medium {
+          color: #03a9f4 !important;
+        }
+        .priority-low {
+          color: #b0b0b0 !important;
+        }
+
+        /* Optional: small visual tweak for consistency */
+        .label-item-meta .priority {
+          font-size: 1rem !important;
+          font-weight: 700 !important;
+          padding: 2px 6px;
+          border-radius: 4px;
+          letter-spacing: 0.5px;
+        }
+
+        .due {
+          display: flex;
+          align-items: center;
+          gap: 4px;
+          font-size: 0.85rem;
+          color: #ff9800 !important;
+          font-weight: 500;
+        }
+
+        .due ha-svg-icon {
+          width: 16px;
+          height: 16px;
+          --mdc-icon-size: 16px;
+          color: #ff9800 !important;
+        }
+
+        .due.overdue {
+          color: #ff9800 !important;
+          font-weight: 600;
+        }
+
+        .due.overdue ha-svg-icon {
+          color: #ff9800 !important;
         }
       `,
     ];
