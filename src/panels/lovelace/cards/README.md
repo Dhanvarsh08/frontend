@@ -62,19 +62,19 @@ This foundation makes it trivial to evolve the card into a full-featured todo po
 ### 2.3 Files changed (high-level)
 
 - src/panels/todo/ha-panel-todo.ts
-  - Imports subscribeItems; adds \_summaryItems and \_summaryUnsub fields.
+  - Imports subscribeItems; adds `_summaryItems` and `_summaryUnsub` fields.
   - Special-case handling for todo.summary in URL/navigation.
   - Adds menu item "Summary of Tasks".
-  - New methods: \_subscribeAllLists() and \_renderSummary().
+  - New methods: `_subscribeAllLists()` and `_renderSummary()`.
   - New CSS for dashboard, stat cards, rings, pie chart, and legend.
   - Minor: non-null assertion when passing entity id to hui-card.
 
 ### 2.4 Implementation (brief)
 
 - subscribeItems(hass, entityId, cb) is used to subscribe to each list’s items and must return an unsubscribe (or Promise resolving to one).
-- \_subscribeAllLists():
-  - clears previous subs/data, subscribes to every list from getTodoLists(this.hass), stores items in \_summaryItems, and collects unsubs in \_summaryUnsub.
-- \_renderSummary(): aggregates counts, renders stat cards and a pie chart using SVG stroke segments.
+- `_subscribeAllLists()`:
+  - clears previous subs/data, subscribes to every list from getTodoLists(this.hass), stores items in `\_summaryItems`, and collects unsubs in `_summaryUnsub`.
+- `_renderSummary()`: aggregates counts, renders stat cards and a pie chart using SVG stroke segments.
 
 ### 2.5 Notes & risks
 
@@ -87,5 +87,46 @@ This foundation makes it trivial to evolve the card into a full-featured todo po
 
 - Add cleanup in disconnectedCallback, i18n support, empty-state handling, and unit/integration tests for subscriptions and aggregation logic.
 - Consider backend summary endpoint if scaling becomes an issue.
+
+---
+
+## 3. Label based Todo's Browsing
+
+## 3.1 Summary
+
+The goal of this extension is to improve task organization and visibility by allowing each todo item to carry a simple text label (e.g. Shopping, Work) that is persisted and surfaced in the UI.## Backend changes
+**Todoist Labels Support – Summary of All Changes (Frontend, Backend, Tests)**
+
+This document is a **single complete summary** of every file that was modified as part of adding **label support** to the Todo / Todoist integration in Home Assistant.
+
+No code is included here — only **file names and descriptions of what was changed**.
+
+---
+
+## 3.2 Frontend Changes (Home Assistant Frontend)
+
+### **Modified Files**
+
+#### 3.2.1 `frontend/src/data/todo.ts`
+
+- Updated `TodoItem` type so `labels` is now a **list of strings**, not a comma-separated string.
+- Modified `createItem()` and `updateItem()` service payloads to send `labels` as a **list**.
+- Ensures all backend calls receive labels in correct format.
+
+#### 3.2.2 `frontend/src/panels/todo/dialog-todo-item-editor.ts`
+
+- Added label input field in the edit dialog.
+- Converts UI comma-separated labels into **list format** before sending to backend.
+- Converts list back into comma-separated string when loading an item.
+- Ensures consistent formatting and preservation of labels on create/update.
+
+#### 3.3.3 `frontend/src/panels/todo/ha-panel-todo.ts`
+
+- Added full **Labels Mode**:
+  - Displays list of unique labels for the todo list.
+  - Supports navigating into items filtered by a label.
+  - Handles labels represented as lists.
+- Updated rendering logic for label-based grouping.
+- Ensured compatibility with both list-formatted labels and empty labels.
 
 ---
