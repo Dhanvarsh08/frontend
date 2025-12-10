@@ -520,22 +520,21 @@ class PanelTodo extends LitElement {
                         <div class="label-item-meta">
                           ${item.due
                             ? html`<div
-                                  class="due ${this._isDueOverdue(item)
-                                    ? "overdue"
-                                    : ""}"
-                                >
-                                  <ha-svg-icon .path=${mdiClock}></ha-svg-icon>
-                                  ${this._isDueToday(item)
-                                    ? this.hass.localize(
-                                        "ui.panel.lovelace.cards.todo-list.today"
-                                      ) || "Today"
-                                    : html`<ha-relative-time
-                                        .hass=${this.hass}
-                                        .datetime=${this._getDueDateTime(item)}
-                                        capitalize
-                                      ></ha-relative-time>`}
-                                </div>
-                                <br /> `
+                                class="due ${this._isDueOverdue(item)
+                                  ? "overdue"
+                                  : ""}"
+                              >
+                                <ha-svg-icon .path=${mdiClock}></ha-svg-icon>
+                                ${this._isDueToday(item)
+                                  ? this.hass.localize(
+                                      "ui.panel.lovelace.cards.todo-list.today"
+                                    ) || "Today"
+                                  : html`<ha-relative-time
+                                      .hass=${this.hass}
+                                      .datetime=${this._getDueDateTime(item)}
+                                      capitalize
+                                    ></ha-relative-time>`}
+                              </div>`
                             : nothing}
                           ${item.priority != null
                             ? html`<span
@@ -1250,29 +1249,28 @@ class PanelTodo extends LitElement {
         .label-item-main {
           display: flex;
           flex-direction: column;
-          gap: 2px;
+          align-items: flex-start;
+          flex: 1 1 auto;
+          min-width: 0;
+          width: 100%;
+          max-width: 100%;
         }
-        .label-item-summary {
-          font-weight: var(--ha-font-weight-medium);
-        }
-        .label-item-completed {
-          text-decoration: line-through;
-          color: var(--secondary-text-color);
-        }
-        .label-item-secondary {
-          color: var(--secondary-text-color);
-          font-size: var(--ha-font-size-s);
-        }
-        .warning {
-          color: var(--error-color);
+        .label-item-summary,
+        .label-item-secondary,
+        .label-item-meta {
+          width: 100%;
+          max-width: 100%;
         }
         .label-item-meta {
           display: flex;
           flex-wrap: wrap;
-          gap: 12px;
-          margin-top: 6px;
+          gap: 8px;
+          margin-top: 4px;
           font-size: 0.8rem;
           color: var(--secondary-text-color);
+          width: 100%;
+          max-width: 100%;
+          align-items: flex-start;
         }
 
         .label-item-meta span {
@@ -1360,6 +1358,41 @@ class PanelTodo extends LitElement {
         .due.overdue ha-svg-icon {
           color: #ff9800 !important;
         }
+        /* ───── FIX TRUNCATED TEXT ONLY IN LABEL DETAIL VIEW ───── */
+        .labels-column ha-list-item {
+          height: auto !important;
+          min-height: 46px !important;
+          align-items: flex-start !important;
+          padding: 4px 0;
+        }
+        .labels-column .label-item-main {
+          width: 100%;
+          flex: 1;
+        }
+        .labels-column .label-item-summary,
+        .labels-column .label-item-secondary.description {
+          white-space: normal !important;
+          word-break: break-word;
+          overflow: visible !important;
+          text-overflow: unset !important;
+          display: block !important;
+          line-height: 1.45;
+        }
+        .labels-column .label-item-summary {
+          margin-bottom: 4px;
+          font-weight: 500;
+        }
+        .labels-column .description {
+          margin-top: 6px;
+          font-size: 0.92rem;
+          color: var(--secondary-text-color);
+          opacity: 0.95;
+        }
+        .labels-column .label-item-meta {
+          margin-top: 10px;
+          gap: 8px 16px;
+        }
+        /* ────────────────────────────────────────────────────── */
       `,
     ];
   }
